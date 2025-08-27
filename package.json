@@ -18,6 +18,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "mongodb": "^6.18.0"
+    "mongodb": "^6.19.0"
+  },
+  "devDependencies": {
+    "cross-env": "^10.0.0"
   }
 }

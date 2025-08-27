@@ -1,34 +1,50 @@
-# Stage 1: Install dependencies and build the client
-FROM node:18-alpine AS build
+# ---- Stage 1: Build the React Frontend ----
+# Use a specific version of node as the 'builder'
+FROM node:18-alpine AS builder
+
 WORKDIR /app
 
-# Copy all package files first to leverage Docker layer caching
-COPY package.json package-lock.json ./
-COPY client/package.json client/package-lock.json ./client/
-COPY server/package.json server/package-lock.json ./server/
+# Copy client package files and install dependencies
+COPY client/package*.json ./client/
+RUN npm install --prefix client
 
-# Run the install script from the root package.json
-RUN npm run install
+# Copy the rest of the client source code
+COPY client/ ./client/
 
-# Copy the rest of the source code
-COPY ./ ./
-
-# Run the client build script
+# Build the client application
+# The build script sets BUILD_PATH=../server/public, so the output goes to /app/server/public
 RUN npm run build --prefix client
 
-# Stage 2: Create the final, lean production image
-FROM node:18-alpine
+# ---- Stage 2: Build the Node.js Server ----
+# Use a clean, small node image for the final production image
+FROM node:18-alpine AS runner
+
 WORKDIR /app
 
-# Copy only the server dependencies and source from the build stage
-COPY --from=build /app/server ./server
-COPY --from=build /app/node_modules ./node_modules
+# Create a non-root user for security
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
-# Copy the built client application from the build stage
-COPY --from=build /app/client/build ./client/build
+# Copy server package files and install ONLY production dependencies
+# Do this as root before switching to appuser
+COPY server/package*.json ./server/
+RUN npm install --prefix server --omit=dev
 
-# Expose the port the server runs on
+# Copy the server source code
+COPY server/ ./server/
+
+# Copy the built frontend from the 'builder' stage into the server's public directory
+# The server expects files in /app/server/public
+COPY --from=builder --chown=appuser:appgroup /app/server/public ./server/public
+
+# Change ownership of server files to appuser
+RUN chown -R appuser:appgroup /app/server
+
+# Switch to non-root user
+USER appuser
+
+# Expose the port the server will run on
 EXPOSE 8000
 
-# Run the server's start script
-CMD ["npm", "start", "--prefix", "server"]
+# Set the command to run the application
+# We use 'node' directly instead of 'npm start' for a cleaner exit signal handling
+CMD ["node", "server/src/server.js"]
